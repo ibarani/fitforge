@@ -19,3 +19,6 @@ backend/.env
 
 # Build artifacts
 *.zip
+# Local deploy scripts (never commit)
+/deploy-*.sh
+*.sh.bak
