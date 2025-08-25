@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FitForge Workout Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #4F46E5;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #4338CA;
+        }
+        .success {
+            color: green;
+            padding: 10px;
+            background: #f0fff4;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .error {
+            color: red;
+            padding: 10px;
+            background: #fff5f5;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .log {
+            background: #f9f9f9;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        input {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🏋️ FitForge End-to-End Test</h1>
+    
+    <div class="section">
+        <h2>1. Test Local Storage</h2>
+        <button onclick="testLocalStorage()">Test Local Storage Save</button>
+        <button onclick="clearLocalStorage()">Clear Local Storage</button>
+        <div id="localStorage-result"></div>
+    </div>
+
+    <div class="section">
+        <h2>2. Simulate Workout Completion</h2>
+        <div>
+            <label>Bodyweight (lbs): <input type="number" id="bodyweight" value="180"></label><br>
+            <label>Notes: <input type="text" id="notes" value="Felt strong today"></label><br>
+            <button onclick="simulateWorkout()">Complete Workout A</button>
+        </div>
+        <div id="workout-result"></div>
+    </div>
+
+    <div class="section">
+        <h2>3. Test Backend Connection</h2>
+        <button onclick="testBackendHealth()">Test Health Endpoint</button>
+        <button onclick="testWorkoutSave()">Test Save to Backend</button>
+        <div id="backend-result"></div>
+    </div>
+
+    <div class="section">
+        <h2>4. Test Cycle Completion</h2>
+        <button onclick="simulateCycleCompletion()">Simulate Full Cycle (6 Workouts)</button>
+        <div id="cycle-result"></div>
+    </div>
+
+    <div class="section">
+        <h2>Activity Log</h2>
+        <div id="log" class="log"></div>
+    </div>
+
+    <script>
+        const API_ENDPOINT = 'https://m76vx6dv45.execute-api.us-west-2.amazonaws.com';
+        
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            const color = type === 'error' ? 'red' : type === 'success' ? 'green' : 'black';
+            logDiv.innerHTML += `<div style="color: ${color}">[${timestamp}] ${message}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function testLocalStorage() {
+            try {
+                const testData = {
+                    workout: 'A_push_power',
+                    date: new Date().toISOString(),
+                    exercises: {
+                        'Barbell Bench Press': [
+                            { weight: 225, reps: 5 },
+                            { weight: 225, reps: 5 },
+                            { weight: 225, reps: 5 },
+                            { weight: 225, reps: 4 }
+                        ]
+                    }
+                };
+                
+                localStorage.setItem('test_workout', JSON.stringify(testData));
+                const retrieved = JSON.parse(localStorage.getItem('test_workout'));
+                
+                if (retrieved.workout === testData.workout) {
+                    document.getElementById('localStorage-result').innerHTML = 
+                        '<div class="success">✅ Local Storage working! Saved and retrieved workout data.</div>';
+                    log('Local storage test passed', 'success');
+                }
+            } catch (error) {
+                document.getElementById('localStorage-result').innerHTML = 
+                    `<div class="error">❌ Local Storage error: ${error.message}</div>`;
+                log(`Local storage error: ${error.message}`, 'error');
+            }
+        }
+
+        function clearLocalStorage() {
+            localStorage.clear();
+            document.getElementById('localStorage-result').innerHTML = 
+                '<div class="success">Cleared all local storage</div>';
+            log('Local storage cleared', 'success');
+        }
+
+        function simulateWorkout() {
+            const bodyweight = document.getElementById('bodyweight').value;
+            const notes = document.getElementById('notes').value;
+            
+            const workoutData = {
+                templateKey: 'A_push_power',
+                title: 'Workout A: Push Day (Strength & Power)',
+                date: new Date().toISOString().split('T')[0],
+                bodyweight: parseFloat(bodyweight),
+                notes: notes,
+                exercises: {
+                    'Barbell Bench Press': [
+                        { weight: 225, reps: 5 },
+                        { weight: 225, reps: 5 },
+                        { weight: 225, reps: 5 },
+                        { weight: 225, reps: 4 }
+                    ],
+                    'Standing Overhead Press': [
+                        { weight: 135, reps: 5 },
+                        { weight: 135, reps: 5 },
+                        { weight: 135, reps: 5 },
+                        { weight: 135, reps: 5 }
+                    ]
+                },
+                exerciseRPEs: {
+                    'Barbell Bench Press': 8,
+                    'Standing Overhead Press': 7
+                },
+                timestamp: Date.now()
+            };
+            
+            // Save to local storage
+            const key = `workout_complete_${Date.now()}`;
+            localStorage.setItem(key, JSON.stringify(workoutData));
+            
+            // Update cycle progress
+            let cycle = localStorage.getItem('current_cycle');
+            cycle = cycle ? JSON.parse(cycle) : { completed: [] };
+            if (!cycle.completed.includes('A_push_power')) {
+                cycle.completed.push('A_push_power');
+            }
+            localStorage.setItem('current_cycle', JSON.stringify(cycle));
+            
+            document.getElementById('workout-result').innerHTML = 
+                `<div class="success">✅ Workout saved! Cycle progress: ${cycle.completed.length}/6</div>`;
+            log(`Workout A completed. Progress: ${cycle.completed.join(', ')}`, 'success');
+        }
+
+        async function testBackendHealth() {
+            try {
+                log('Testing backend health endpoint...');
+                const response = await fetch(`${API_ENDPOINT}/health`);
+                const text = await response.text();
+                
+                if (response.ok) {
+                    document.getElementById('backend-result').innerHTML = 
+                        `<div class="success">✅ Backend connected! Response: ${text}</div>`;
+                    log('Backend health check passed', 'success');
+                } else {
+                    document.getElementById('backend-result').innerHTML = 
+                        `<div class="error">⚠️ Backend returned ${response.status}: ${text}</div>`;
+                    log(`Backend returned ${response.status}`, 'error');
+                }
+            } catch (error) {
+                document.getElementById('backend-result').innerHTML = 
+                    `<div class="error">❌ Backend connection failed: ${error.message}</div>`;
+                log(`Backend error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testWorkoutSave() {
+            try {
+                log('Testing workout save to backend...');
+                const workoutData = {
+                    userId: 'test-user-123',
+                    templateKey: 'A_push_power',
+                    date: new Date().toISOString(),
+                    bodyweight: 180,
+                    notes: 'Test workout',
+                    exercises: {
+                        'Barbell Bench Press': [
+                            { weight: 225, reps: 5 }
+                        ]
+                    },
+                    exerciseRPEs: {
+                        'Barbell Bench Press': 8
+                    },
+                    timestamp: Date.now()
+                };
+                
+                const response = await fetch(`${API_ENDPOINT}/api/workouts`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(workoutData)
+                });
+                
+                const text = await response.text();
+                
+                if (response.ok) {
+                    document.getElementById('backend-result').innerHTML = 
+                        `<div class="success">✅ Workout saved to backend! Response: ${text}</div>`;
+                    log('Workout saved to backend', 'success');
+                } else {
+                    document.getElementById('backend-result').innerHTML = 
+                        `<div class="error">⚠️ Backend save failed ${response.status}: ${text}</div>`;
+                    log(`Backend save failed: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                document.getElementById('backend-result').innerHTML = 
+                    `<div class="error">❌ Backend save error: ${error.message}</div>`;
+                log(`Save error: ${error.message}`, 'error');
+            }
+        }
+
+        function simulateCycleCompletion() {
+            const workouts = [
+                'A_push_power',
+                'A_pull_width', 
+                'B_push_hyp',
+                'B_pull_strength',
+                'C_leg_day',
+                'D_core_circuit'
+            ];
+            
+            // Clear and set new cycle
+            const cycle = { completed: workouts };
+            localStorage.setItem('current_cycle', JSON.stringify(cycle));
+            
+            // Save each workout
+            workouts.forEach((workout, index) => {
+                const data = {
+                    templateKey: workout,
+                    date: new Date(Date.now() - (5 - index) * 86400000).toISOString().split('T')[0],
+                    exercises: { 'Test Exercise': [{ weight: 100, reps: 10 }] },
+                    timestamp: Date.now() - (5 - index) * 86400000
+                };
+                localStorage.setItem(`workout_${workout}`, JSON.stringify(data));
+            });
+            
+            document.getElementById('cycle-result').innerHTML = 
+                `<div class="success">✅ Full cycle completed! Ready for AI analysis.</div>`;
+            log('Full 6-workout cycle simulated', 'success');
+            
+            // Check if this would trigger analysis
+            if (workouts.length === 6) {
+                alert('🎉 Congratulations! You completed a full 6-workout training cycle! AI analysis would be triggered here.');
+                log('AI analysis would be triggered!', 'success');
+            }
+        }
+
+        // Initial test on load
+        window.onload = () => {
+            log('Test page loaded. Ready for testing.');
+            
+            // Check current cycle status
+            const cycle = localStorage.getItem('current_cycle');
+            if (cycle) {
+                const parsed = JSON.parse(cycle);
+                log(`Current cycle progress: ${parsed.completed.length}/6 workouts`);
+            }
+        };
+    </script>
+</body>
+</html>

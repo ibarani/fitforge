@@ -1,0 +1,254 @@
+# Simplified AWS Infrastructure for Single User
+# Much cheaper than RDS - likely FREE tier forever
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'FitForge - Personal Workout Tracker for Igor'
+
+Resources:
+  # Single DynamoDB Table (Pay per request - likely free for single user)
+  WorkoutTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: fitforge-main
+      BillingMode: PAY_PER_REQUEST  # No monthly costs, pay only for usage
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: FitForge
+        - Key: User
+          Value: Igor
+
+  # Cognito User Pool (Free for up to 50,000 MAUs)
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: fitforge-users
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: false
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true  # Only you can create users
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: fitforge-web
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  # Lambda Function for API (Pay per invocation - pennies per month)
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: fitforge-api
+      Runtime: nodejs18.x
+      Handler: index.handler
+      CodeUri: ../
+      MemorySize: 256  # Small memory for cost savings
+      Timeout: 10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref WorkoutTable
+          SECRET_NAME: fitforge-secrets
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WorkoutTable
+        - Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:fitforge-secrets-*'
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            Method: ANY
+            Path: /{proxy+}
+            ApiId: !Ref HttpApi
+
+  # Simple HTTP API (Cheaper than REST API)
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: prod
+      CorsConfiguration:
+        AllowOrigins:
+          - http://localhost:5173
+          - https://www.barani.org
+          - https://barani.org
+          - !Sub 'https://${CloudFrontDistribution.DomainName}'
+        AllowMethods:
+          - '*'
+        AllowHeaders:
+          - '*'
+
+  # S3 Bucket for Frontend
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'fitforge-frontend-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+
+  # CloudFront Distribution (Free tier: 1TB transfer/month)
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Origins:
+          - Id: S3Origin
+            DomainName: !Sub '${FrontendBucket}.s3-website-${AWS::Region}.amazonaws.com'
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only
+        Enabled: true
+        DefaultRootObject: index.html
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          ForwardedValues:
+            QueryString: false
+        PriceClass: PriceClass_100  # US and Europe only (cheaper)
+        CustomErrorResponses:
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html  # For React Router
+
+  # Create the initial user (Igor)
+  CreateUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: fitforge-create-user
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Timeout: 10
+      InlineCode: |
+        const { CognitoIdentityProviderClient, AdminCreateUserCommand } = require('@aws-sdk/client-cognito-identity-provider');
+        
+        exports.handler = async (event) => {
+          const client = new CognitoIdentityProviderClient({});
+          try {
+            await client.send(new AdminCreateUserCommand({
+              UserPoolId: process.env.USER_POOL_ID,
+              Username: 'igor@barani.org',
+              UserAttributes: [
+                { Name: 'email', Value: 'igor@barani.org' },
+                { Name: 'email_verified', Value: 'true' },
+                { Name: 'name', Value: 'Igor Barani' }
+              ],
+              TemporaryPassword: 'TempPassword123!',
+              MessageAction: 'SUPPRESS'
+            }));
+            return { statusCode: 200, body: 'User created' };
+          } catch (error) {
+            if (error.name === 'UsernameExistsException') {
+              return { statusCode: 200, body: 'User already exists' };
+            }
+            throw error;
+          }
+        };
+      Environment:
+        Variables:
+          USER_POOL_ID: !Ref UserPool
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminCreateUser
+              Resource: !GetAtt UserPool.Arn
+
+Outputs:
+  FrontendURL:
+    Description: CloudFront URL for the application
+    Value: !Sub 'https://${CloudFrontDistribution.DomainName}'
+
+  ApiEndpoint:
+    Description: API Gateway endpoint
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
+
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref UserPoolClient
+
+  DeploymentInstructions:
+    Description: Next steps
+    Value: |
+      1. Deploy frontend: aws s3 sync dist/ s3://fitforge-frontend-${AWS::AccountId}
+      2. Set temporary password: aws cognito-idp admin-set-user-password --user-pool-id ${UserPool} --username igor@barani.org --password YourPassword123! --permanent
+      3. Update .env with the outputs above
+      4. Your app is ready at the CloudFront URL!
+
+  EstimatedMonthlyCost:
+    Description: Estimated AWS costs for single user
+    Value: |
+      DynamoDB: ~$0.00 (free tier: 25GB storage, 25 read/write units)
+      Lambda: ~$0.00 (free tier: 1M requests/month)
+      API Gateway: ~$0.00 (free tier: 1M requests/month)
+      S3: ~$0.01 (minimal storage)
+      CloudFront: ~$0.00 (free tier: 1TB transfer)
+      Cognito: ~$0.00 (free up to 50,000 MAUs)
+      TOTAL: < $1/month (likely completely free)

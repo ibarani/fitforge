@@ -1,0 +1,21 @@
+node_modules/
+.env
+.env.local
+*.log
+.DS_Store
+dist/
+build/
+coverage/
+.vscode/
+.idea/
+
+# AWS Configuration (contains sensitive IDs)
+src/aws-config.js
+
+# Backend
+backend/function.zip
+backend/node_modules/
+backend/.env
+
+# Build artifacts
+*.zip
